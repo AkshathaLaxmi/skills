@@ -326,7 +326,9 @@ def judge_dimension(
     system_prompt = (
         "You are a skill quality evaluator for Claude Code agent skills. "
         "You assess SKILL.md files that serve as prompts/instructions for an AI coding assistant. "
-        "Be rigorous but fair. Evaluate based on the rubric provided."
+        "Be rigorous but fair. Evaluate based on the rubric provided. "
+        "Keep your reasoning concise and specific — state what the skill does well or poorly "
+        "with concrete references, not generic adjectives or filler praise."
     )
 
     user_prompt = (
@@ -337,10 +339,12 @@ def judge_dimension(
         f"## Skill Content\n\n"
         f"```markdown\n{skill_content}\n```"
         f"{meta_text}\n\n"
-        f"Think step-by-step about your evaluation, then provide your final score.\n\n"
+        f"Evaluate the skill, then provide your final score.\n\n"
         f"Respond with ONLY a JSON object in this exact format:\n"
         f'{{"reasoning": "your analysis here", "score": N, "dimension": "{dimension}"}}\n\n'
-        f"where N is an integer from 1 to 5."
+        f"where N is an integer from 1 to 5.\n\n"
+        f"Keep reasoning to 1-2 sentences. Be specific — cite concrete strengths or gaps, "
+        f"not vague praise. Avoid adjectives like 'comprehensive', 'exceptional', 'robust'."
     )
 
     cmd = [
@@ -447,10 +451,10 @@ def format_text_report(skill_dir: Path, tier1: list[dict] | None, tier2: list[di
     if tier2 is not None:
         lines.append("--- Tier 2: LLM-as-Judge ---")
         for r in tier2:
-            reasoning_short = r.get("reasoning", "")[:120]
-            if len(r.get("reasoning", "")) > 120:
-                reasoning_short += "..."
-            lines.append(f"{r['dimension'].capitalize():15s} {r['score']}/5 — \"{reasoning_short}\"")
+            reasoning = r.get("reasoning", "").strip()
+            lines.append(f"\n{r['dimension'].capitalize()} — {r['score']}/5")
+            if reasoning:
+                lines.append(f"  {reasoning}")
         lines.append("")
 
     lines.append("--- Summary ---")
@@ -547,6 +551,12 @@ def main():
         print(json.dumps(build_json_report(skill_dir, tier1_results, tier2_results), indent=2))
     else:
         print(format_text_report(skill_dir, tier1_results, tier2_results))
+
+    # Exit non-zero if any Tier 1 check failed.
+    # Only Tier 1 affects the exit code — Tier 2 scores are subjective
+    # (LLM-as-judge) and should not block a PR merge.
+    if tier1_results and any(not r["passed"] for r in tier1_results):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
