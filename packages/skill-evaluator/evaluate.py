@@ -548,7 +548,9 @@ def main():
     else:
         print(format_text_report(skill_dir, tier1_results, tier2_results))
 
-    # Exit non-zero if any Tier 1 check failed
+    # Exit non-zero if any Tier 1 check failed.
+    # Only Tier 1 affects the exit code — Tier 2 scores are subjective
+    # (LLM-as-judge) and should not block a PR merge.
     if tier1_results and any(not r["passed"] for r in tier1_results):
         sys.exit(1)
 

@@ -8,6 +8,7 @@ on:
       - "packages/skill-evaluator/**"
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
@@ -26,6 +27,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
 
       - name: Detect changed skills
         id: detect
@@ -63,6 +66,8 @@ jobs:
         id: evaluate
         if: steps.detect.outputs.skills != ''
         working-directory: packages/skill-evaluator
+        env:
+          SKILLS_LIST: ${{ steps.detect.outputs.skills }}
         run: |
           FAILED=0
           TOTAL=0
@@ -90,7 +95,7 @@ jobs:
               FAILED=$((FAILED + 1))
             fi
             echo "::endgroup::"
-          done <<< "${{ steps.detect.outputs.skills }}"
+          done <<< "$SKILLS_LIST"
 
           echo ""
           echo "=== Results: ${TOTAL} skill(s) evaluated, ${FAILED} failed ==="
@@ -109,20 +114,25 @@ jobs:
       - name: Comment on PR
         if: always() && steps.evaluate.outcome != 'skipped'
         uses: actions/github-script@v7
+        env:
+          FAILED_COUNT: ${{ steps.evaluate.outputs.failed }}
+          TOTAL_COUNT: ${{ steps.evaluate.outputs.total }}
+          REPORT_FILE: ${{ steps.evaluate.outputs.report_file }}
         with:
           script: |
             const fs = require('fs');
-            const failed = parseInt('${{ steps.evaluate.outputs.failed }}', 10);
-            const total = parseInt('${{ steps.evaluate.outputs.total }}', 10);
+            const failed = parseInt(process.env.FAILED_COUNT, 10);
+            const total = parseInt(process.env.TOTAL_COUNT, 10);
             const status = failed === 0 ? '✅ All checks passed' : `❌ ${failed} of ${total} skill(s) failed`;
 
             let details = '';
-            const reportFile = '${{ steps.evaluate.outputs.report_file }}';
+            const reportFile = process.env.REPORT_FILE;
             if (reportFile && fs.existsSync(reportFile)) {
               details = fs.readFileSync(reportFile, 'utf8');
             }
 
-            const body = `## Skill Evaluator — Tier 1 Results\n\n**${status}**\n\n${details}`;
+            const marker = '<!-- skill-evaluator-results -->';
+            const body = `${marker}\n## Skill Evaluator — Tier 1 Results\n\n**${status}**\n\n${details}`;
 
             // Find and update existing comment, or create a new one
             const { data: comments } = await github.rest.issues.listComments({
@@ -130,8 +140,7 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            const marker = '## Skill Evaluator — Tier 1 Results';
-            const existing = comments.find(c => c.body.startsWith(marker));
+            const existing = comments.find(c => c.body.includes(marker));
 
             if (existing) {
               await github.rest.issues.updateComment({
